@@ -1,4 +1,5 @@
-import numpy as np, matplotlib, pandas, math
+import numpy as np, pandas, math
+import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from cvxopt import matrix, solvers
 from A2helpers import polyKernel, linearKernel, gaussKernel, generateData
@@ -34,53 +35,51 @@ def minExpLinear(X, y, lamb):
     
     return w_opt, w0_opt
 
-import numpy as np
-from cvxopt import matrix, solvers
-
 #b)
 def minHinge(X, y, lamb, stabilizer=1e-5):
     n, d = X.shape
     y = y.flatten()
     
-    # P matrix (quadratic term)
+    # quadratic term (only penalize w)
     P = np.diag(np.concatenate([lamb*np.ones(d), [0], np.zeros(n)]))
     P += stabilizer * np.eye(d + 1 + n)
 
-    # q vector
+    # linear term
     q = np.concatenate([np.zeros(d+1), np.ones(n)])
     
-    # G and h matrices
-    # 1 - y_i (x_i w + w0) <= xi
+    # linear coonstraints: y_i (x_i w + w0) >= 1 - xi
     G_std = np.zeros((n, d+1+n))
     for i in range(n):
         G_std[i, :d] = -y[i] * X[i]
         G_std[i, d] = -y[i]
-        G_std[i, d+1 + i] = 1
-    h_std = np.ones(n)
-
-    # xi >= 0
+        G_std[i, d+1 + i] = -1
+    h_std = -np.ones(n)
+    
+    # xi >= 0  →  -xi ≤ 0
     G_xi = np.zeros((n, d+1+n))
     for i in range(n):
         G_xi[i, d+1 + i] = -1
     h_xi = np.zeros(n)
-
+    
+    # combine constraints
     G = np.vstack([G_std, G_xi])
     h = np.hstack([h_std, h_xi])
-
-    # convert to cvxopt matrices
+    
+    from cvxopt import matrix, solvers
+    solvers.options['show_progress'] = False
+    
     P_cvx = matrix(P)
     q_cvx = matrix(q)
     G_cvx = matrix(G)
     h_cvx = matrix(h)
-
-    solvers.options['show_progress'] = False
-    solution = solvers.qp(P_cvx, q_cvx, G_cvx, h_cvx)
-    z = np.array(solution['x']).flatten()
+    
+    sol = solvers.qp(P_cvx, q_cvx, G_cvx, h_cvx)
+    z = np.array(sol['x']).flatten()
     
     w = z[:d]
     w0 = z[d]
-    
     return w, w0
+
 
 
 #c)
@@ -116,6 +115,19 @@ def synExperimentsRegularize():
                 # Generate synthetic training and test data
                 Xtrain, ytrain = generateData(n=n_train, gen_model=gen_model)
                 Xtest, ytest = generateData(n=n_test, gen_model=gen_model)
+
+                plt.scatter(Xtrain[:,0], Xtrain[:,1], c=ytrain.flatten(), cmap='bwr', alpha=0.5)
+                plt.xlabel('Feature 1')
+                plt.ylabel('Feature 2')
+                plt.title('Training Data Scatter Plot')
+                plt.show()
+
+                plt.scatter(Xtest[:, 0], Xtest[:, 1], c=ytest.flatten(), cmap='bwr', alpha=0.5)
+                plt.xlabel('Feature 1')
+                plt.ylabel('Feature 2')
+                plt.title('Test Data Scatter Plot')
+                plt.show()
+
 
                 # ExpLinear classifier
                 w, w0 = minExpLinear(Xtrain, ytrain, lamb)
