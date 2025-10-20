@@ -116,19 +116,6 @@ def synExperimentsRegularize():
                 Xtrain, ytrain = generateData(n=n_train, gen_model=gen_model)
                 Xtest, ytest = generateData(n=n_test, gen_model=gen_model)
 
-                plt.scatter(Xtrain[:,0], Xtrain[:,1], c=ytrain.flatten(), cmap='bwr', alpha=0.5)
-                plt.xlabel('Feature 1')
-                plt.ylabel('Feature 2')
-                plt.title('Training Data Scatter Plot')
-                plt.show()
-
-                plt.scatter(Xtest[:, 0], Xtest[:, 1], c=ytest.flatten(), cmap='bwr', alpha=0.5)
-                plt.xlabel('Feature 1')
-                plt.ylabel('Feature 2')
-                plt.title('Test Data Scatter Plot')
-                plt.show()
-
-
                 # ExpLinear classifier
                 w, w0 = minExpLinear(Xtrain, ytrain, lamb)
                 ytrain_pred = classify(Xtrain, w, w0)
