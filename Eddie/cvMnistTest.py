@@ -1,3 +1,4 @@
+#cvMnist Test
 import numpy as np
 from A2codes import cvMnist
 from A2helpers import linearKernel, polyKernel, gaussKernel

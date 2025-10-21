@@ -1,4 +1,5 @@
-import numpy as np, pandas, math
+import numpy as np, math
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from cvxopt import matrix, solvers
@@ -131,14 +132,14 @@ def synExperimentsRegularize():
                 test_acc_hinge[i, j, r] = np.mean(ytest_pred.flatten() == ytest.flatten())
 
     # Average accuracies over runs
-    train_acc_explinear_avg = np.mean(train_acc_explinear, axis=2)  # shape: (4,3)
+    train_acc_explinear_avg = np.mean(train_acc_explinear, axis=2)
     test_acc_explinear_avg = np.mean(test_acc_explinear, axis=2)
     train_acc_hinge_avg = np.mean(train_acc_hinge, axis=2)
     test_acc_hinge_avg = np.mean(test_acc_hinge, axis=2)
 
     # put ExpLinear and Hinge data into 4x6 matrices
-    train_acc = np.hstack([train_acc_explinear_avg, train_acc_hinge_avg])  # shape: 4x6
-    test_acc = np.hstack([test_acc_explinear_avg, test_acc_hinge_avg])     # shape: 4x6
+    train_acc = np.hstack([train_acc_explinear_avg, train_acc_hinge_avg])
+    test_acc = np.hstack([test_acc_explinear_avg, test_acc_hinge_avg])
 
     return train_acc, test_acc
 
@@ -150,7 +151,6 @@ def synExperimentsRegularize():
 #a)
 
 def dualHinge(X, y, lamb, kernel_func, stabilizer=1e-5):
-
     X = np.asarray(X)
     y = np.asarray(y).reshape(-1)
     n = X.shape[0]
@@ -159,58 +159,42 @@ def dualHinge(X, y, lamb, kernel_func, stabilizer=1e-5):
     if lamb <= 0:
         raise ValueError("lamb must be > 0")
 
-    # Build kernel matrix K (n x n)
+    # Build kernel matrix correctly
     K = np.empty((n, n), dtype=float)
     for i in range(n):
         for j in range(i, n):
-            Kij = kernel_func(X[i], X[j])
+            Kij = np.atleast_2d(kernel_func(X[i:i+1], X[j:j+1]))[0, 0]
             K[i, j] = Kij
             K[j, i] = Kij
 
     y_col = y.reshape(-1, 1)
     DeltaKDelta = (y_col * K) * y_col.T
-
-    P = (1.0 / lamb) * DeltaKDelta
-
-    # stabilizer
-    P = P + stabilizer * np.eye(n)
-    q = -np.ones(n, dtype=float)
-
-    #qp
-    solvers.options['show_progress'] = False
+    P = (1.0 / lamb) * DeltaKDelta + stabilizer * np.eye(n)
+    q = -np.ones(n)
 
     P_cvx = matrix(P)
     q_cvx = matrix(q)
+    G_cvx = matrix(np.vstack([-np.eye(n), np.eye(n)]))
+    h_cvx = matrix(np.hstack([np.zeros(n), np.ones(n)]))
+    A_cvx = matrix(y.reshape(1, -1))
+    b_cvx = matrix([0.0])
 
-    # G and h
-    G_top = -np.eye(n)
-    G_bottom = np.eye(n)
-    G_np = np.vstack([G_top, G_bottom])
-    h_np = np.hstack([np.zeros(n), np.ones(n)])
-
-    G_cvx = matrix(G_np)
-    h_cvx = matrix(h_np)
-
-    A_cvx = matrix(y.reshape(1, -1).astype(float))
-    b_cvx = matrix(np.array([0.0]))
-
+    solvers.options['show_progress'] = False
     sol = solvers.qp(P_cvx, q_cvx, G_cvx, h_cvx, A_cvx, b_cvx)
-    alpha = np.array(sol['x']).reshape(-1)
+    alpha = np.clip(np.array(sol['x']).flatten(), 0, 1)
 
-    alpha = np.clip(alpha, 0.0, 1.0)
+    # compute b robustly
+    sv_mask = (alpha > 1e-5) & (alpha < 1 - 1e-5)
+    if np.any(sv_mask):
+        b_vals = []
+        for i in np.where(sv_mask)[0]:
+            b_vals.append(y[i] - (1.0 / lamb) * np.dot(K[i, :], y * alpha))
+        b = np.mean(b_vals)
+    else:
+        b = 0.0
 
-    a = alpha.reshape(-1, 1)
+    return alpha[:, None], b
 
-    # compute intercept b:
-    # choose an index i whose alpha_i is closest to 0.5 (robust to numeric)
-    idx = int(np.argmin(np.abs(alpha - 0.5)))
-
-    # compute b using chosen i: b = y_i - (1/lamb) * k_i^T (Delta(y) alpha)
-    delta_y_alpha = y * alpha
-    k_i = K[idx, :]
-    b = float(y[idx] - (1.0 / lamb) * np.dot(k_i, delta_y_alpha))
-
-    return a, b
 
 #b)
 
@@ -220,34 +204,23 @@ def dualClassify(Xtest, a, b, X, y, lamb, kernel_func):
     y = np.asarray(y).reshape(-1)
     a = np.asarray(a).reshape(-1)
 
-    m = Xtest.shape[0]
-    n = X.shape[0]
-
-    # compute kernel matrix between test points and training points
+    m, n = Xtest.shape[0], X.shape[0]
     Ktest = np.empty((m, n))
     for i in range(m):
         for j in range(n):
-            Ktest[i, j] = kernel_func(Xtest[i], X[j])
+            Ktest[i, j] = np.atleast_2d(kernel_func(Xtest[i:i+1], X[j:j+1]))[0, 0]
 
-    delta_y_a = y * a  # (n,)
-
-    f = (1.0 / lamb) * (Ktest @ delta_y_a) + b  # (m,)
-
-    # Predicted labels = sign(f)
+    f = (1.0 / lamb) * (Ktest @ (y * a)) + b
     yhat = np.sign(f).reshape(-1, 1)
-
-    # Handle case where f == 0 → classify as +1
     yhat[yhat == 0] = 1.0
-
     return yhat
 
 
 
 
 
+
 #c)
-import numpy as np
-import pandas as pd
 
 def cvMnist(dataset_folder, lamb_list, kernel_list, k=5):
 
